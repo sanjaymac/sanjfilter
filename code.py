@@ -2,8 +2,8 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import re
-from urllib.parse import urljoin, urlparse
 import pandas as pd
+from urllib.parse import urljoin
 
 
 def fetch_page(url: str, timeout: int = 10) -> str:
@@ -19,44 +19,46 @@ def fetch_page(url: str, timeout: int = 10) -> str:
     return resp.text
 
 
-def get_episode_links_from_html(html: str, domain: str, slug: str) -> list:
-    links = set()
+def get_episode_links_from_html(html: str) -> list:
     soup = BeautifulSoup(html, 'html.parser')
+    episode_links = set()
     for a in soup.find_all('a', href=True):
         href = a['href']
-        full = href if href.startswith('http') else urljoin(domain, href)
-        if full.startswith(f"{domain}{slug}-"):
-            links.add(full)
-    return list(links)
+        if re.search(r'-episod-\d+', href):  # Matches links like curang-tanpa-niat-episod-1
+            episode_links.add(href)
+    return list(episode_links)
 
 
 def get_paginated_episode_links(base_url: str, max_pages: int = 100) -> list:
-    parsed = urlparse(base_url)
-    domain = f"{parsed.scheme}://{parsed.netloc}"
-    slug = parsed.path.rstrip('/')
     all_links = set()
 
     for page in range(1, max_pages + 1):
-        paginated_url = f"{slug}/page/{page}/"
-        full_url = urljoin(domain, paginated_url)
+        if page == 1:
+            paginated_url = base_url
+        else:
+            paginated_url = f"{base_url.rstrip('/')}/page/{page}/"
+
         try:
-            html = fetch_page(full_url)
-            episode_links = get_episode_links_from_html(html, domain, slug)
+            html = fetch_page(paginated_url)
+            episode_links = get_episode_links_from_html(html)
             if not episode_links:
                 break
             all_links.update(episode_links)
         except requests.HTTPError:
             break
-        except Exception:
+        except Exception as e:
+            print(f"Error on page {page}: {e}")
             break
-    return list(all_links)
+
+    return sorted(list(all_links))
 
 
 # --- Streamlit UI ---
+st.set_page_config(page_title="Episode Link Extractor", layout="wide")
 st.title("📡 Multi-URL Episode Link Extractor")
-st.markdown("Enter multiple base URLs (one per line). The app will extract episode links up to 100 pages per base URL.")
+st.markdown("Enter multiple base URLs (one per line). The app will extract episode links (e.g., `-episod-1`) from up to 100 pages per base URL.")
 
-urls_input = st.text_area("🔗 Enter Base URLs", placeholder="https://example.com/show1/\nhttps://example.com/show2/")
+urls_input = st.text_area("🔗 Enter Base URLs", placeholder="https://v-myflm4u.com/category/curang-tanpa-niat/")
 max_pages = st.slider("📄 Max Pages per URL", 1, 100, 100)
 
 if st.button("Fetch Episode Links"):
