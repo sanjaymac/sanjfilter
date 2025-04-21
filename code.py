@@ -19,17 +19,26 @@ def fetch_page(url: str, timeout: int = 10) -> str:
     return resp.text
 
 
-def get_episode_links_from_html(html: str) -> list:
+def get_links_from_html(html: str, base_url: str, mode: str, regex_filter: str = None) -> list:
     soup = BeautifulSoup(html, 'html.parser')
-    episode_links = set()
+    links = set()
     for a in soup.find_all('a', href=True):
         href = a['href']
-        if re.search(r'-episod-\d+', href):  # Matches links like curang-tanpa-niat-episod-1
-            episode_links.add(href)
-    return list(episode_links)
+        full_link = urljoin(base_url, href)
+
+        if mode == "Episode Links Only":
+            if re.search(r'-episod-\d+', href):
+                links.add(full_link)
+        else:  # All Links
+            if regex_filter:
+                if re.search(regex_filter, href, re.IGNORECASE):
+                    links.add(full_link)
+            else:
+                links.add(full_link)
+    return list(links)
 
 
-def get_paginated_episode_links(base_url: str, max_pages: int = 100) -> list:
+def get_paginated_links(base_url: str, max_pages: int, mode: str, regex_filter: str = None) -> list:
     all_links = set()
 
     for page in range(1, max_pages + 1):
@@ -40,10 +49,10 @@ def get_paginated_episode_links(base_url: str, max_pages: int = 100) -> list:
 
         try:
             html = fetch_page(paginated_url)
-            episode_links = get_episode_links_from_html(html)
-            if not episode_links:
+            page_links = get_links_from_html(html, base_url, mode, regex_filter)
+            if not page_links:
                 break
-            all_links.update(episode_links)
+            all_links.update(page_links)
         except requests.HTTPError:
             break
         except Exception as e:
@@ -54,37 +63,42 @@ def get_paginated_episode_links(base_url: str, max_pages: int = 100) -> list:
 
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Episode Link Extractor", layout="wide")
-st.title("📡 Multi-URL Episode Link Extractor")
-st.markdown("Enter multiple base URLs (one per line). The app will extract episode links (e.g., `-episod-1`) from up to 100 pages per base URL.")
+st.set_page_config(page_title="Link Extractor Tool", layout="wide")
+st.title("🔗 Multi-URL Link Extractor")
+st.markdown("Enter base URLs (one per line). This app scrapes either **all links** or **episode-based links** from paginated content.")
 
-urls_input = st.text_area("🔗 Enter Base URLs", placeholder="https://v-myflm4u.com/category/curang-tanpa-niat/")
+urls_input = st.text_area("🌐 Enter Base URLs", placeholder="https://v-myflm4u.com/category/curang-tanpa-niat/")
+mode = st.radio("🔍 What type of links do you want to extract?", ["Episode Links Only", "All Links"])
 max_pages = st.slider("📄 Max Pages per URL", 1, 100, 100)
 
-if st.button("Fetch Episode Links"):
+regex_filter = None
+if mode == "All Links":
+    regex_filter = st.text_input("🧪 Optional Regex Filter (e.g. `drive|mega|zippy`)", placeholder="Leave empty to get all links")
+
+if st.button("🚀 Fetch Links"):
     base_urls = [url.strip() for url in urls_input.strip().splitlines() if url.strip()]
     all_results = []
 
     with st.spinner("Scraping all URLs..."):
         for base_url in base_urls:
             try:
-                episode_links = get_paginated_episode_links(base_url, max_pages)
-                for link in episode_links:
+                links = get_paginated_links(base_url, max_pages, mode, regex_filter)
+                for link in links:
                     all_results.append({
                         "Base URL": base_url,
-                        "Fetched Link": link
+                        "Link Found": link
                     })
             except Exception as e:
                 all_results.append({
                     "Base URL": base_url,
-                    "Fetched Link": f"Error: {e}"
+                    "Link Found": f"Error: {e}"
                 })
 
     if all_results:
         df = pd.DataFrame(all_results)
-        st.subheader("🔍 Extracted Episode Links")
+        st.subheader("📋 Extracted Links")
         st.dataframe(df, use_container_width=True)
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download CSV", data=csv, file_name="episode_links.csv", mime="text/csv")
+        st.download_button("📥 Download CSV", data=csv, file_name="scraped_links.csv", mime="text/csv")
     else:
         st.warning("No links found.")
