@@ -1,10 +1,12 @@
+import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import re
 from urllib.parse import urljoin, urlparse
+import pandas as pd
 
 
-def get_player_links(html: str) -> set:
+def get_player_links(html: str) -> list:
     links = set()
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -23,10 +25,10 @@ def get_player_links(html: str) -> set:
         for match in re.findall(pattern, html):
             links.add(match)
 
-    return links
+    return list(links)
 
 
-def get_episode_links_from_html(html: str, domain: str, slug: str) -> set:
+def get_episode_links_from_html(html: str, domain: str, slug: str) -> list:
     links = set()
     soup = BeautifulSoup(html, 'html.parser')
     for a in soup.find_all('a', href=True):
@@ -34,10 +36,10 @@ def get_episode_links_from_html(html: str, domain: str, slug: str) -> set:
         full = href if href.startswith('http') else urljoin(domain, href)
         if full.startswith(f"{domain}{slug}-"):
             links.add(full)
-    return links
+    return list(links)
 
 
-def get_all_paginated_episode_links(base_url: str, max_pages: int = 10) -> set:
+def get_all_paginated_episode_links(base_url: str, max_pages: int = 10) -> list:
     parsed = urlparse(base_url)
     domain = f"{parsed.scheme}://{parsed.netloc}"
     slug = parsed.path.rstrip('/')
@@ -47,16 +49,14 @@ def get_all_paginated_episode_links(base_url: str, max_pages: int = 10) -> set:
         paginated_url = f"{slug}/page/{page}/"
         full_url = urljoin(domain, paginated_url)
         try:
-            print(f"Fetching: {full_url}")
             html = fetch_page(full_url)
             episode_links = get_episode_links_from_html(html, domain, slug)
             if not episode_links:
-                break  # Stop if no more links found
+                break
             all_links.update(episode_links)
-        except requests.HTTPError as e:
-            print(f"Stopped at page {page}: {e}")
+        except requests.HTTPError:
             break
-    return all_links
+    return list(all_links)
 
 
 def fetch_page(url: str, timeout: int = 10) -> str:
@@ -72,22 +72,33 @@ def fetch_page(url: str, timeout: int = 10) -> str:
     return resp.text
 
 
-if __name__ == '__main__':
-    base_url = 'https://nonton9.cfd/curang-tanpa-niat/'
-    html = fetch_page(base_url)
+# --- Streamlit App ---
+st.title("🎬 Streaming Page Scraper")
+st.markdown("Enter a streaming page URL to extract player and episode links.")
 
-    player_links = get_player_links(html)
-    if player_links:
-        print("Player links found:")
-        for link in sorted(player_links):
-            print(link)
-    else:
-        print("No player links found on the first page.")
+base_url = st.text_input("🔗 Base URL", "https://nonton9.cfd/curang-tanpa-niat/")
+max_pages = st.slider("📄 Max Pages to Search", 1, 20, 10)
 
-    episode_links = get_all_paginated_episode_links(base_url, max_pages=10)
-    if episode_links:
-        print("\nAll episode links across pagination:")
-        for link in sorted(episode_links):
-            print(link)
-    else:
-        print("No episode links found across pages.")
+if st.button("Scrape"):
+    try:
+        with st.spinner("Fetching base page..."):
+            html = fetch_page(base_url)
+
+        # Player links from first page
+        player_links = get_player_links(html)
+        st.subheader("📺 Player Links (First Page)")
+        if player_links:
+            st.dataframe(pd.DataFrame(player_links, columns=["Player Link"]))
+        else:
+            st.info("No player links found.")
+
+        # Episode links across pagination
+        episode_links = get_all_paginated_episode_links(base_url, max_pages)
+        st.subheader("🎞️ Episode Links (Paginated)")
+        if episode_links:
+            st.dataframe(pd.DataFrame(episode_links, columns=["Episode Link"]))
+        else:
+            st.info("No episode links found.")
+
+    except Exception as e:
+        st.error(f"Error: {e}")
