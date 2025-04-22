@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import re
 import pandas as pd
 from urllib.parse import urljoin
+from rapidfuzz import fuzz
 
 
 def fetch_page(url: str, timeout: int = 10) -> str:
@@ -19,9 +20,14 @@ def fetch_page(url: str, timeout: int = 10) -> str:
     return resp.text
 
 
-def get_links_from_html(html: str, base_url: str, mode: str, regex_filter: str = None) -> list:
+def get_links_from_html(html: str, base_url: str, mode: str, fuzzy_filter: str = None) -> list:
     soup = BeautifulSoup(html, 'html.parser')
     links = set()
+
+    keywords = []
+    if fuzzy_filter:
+        keywords = [kw.strip() for kw in re.split(r'[|,]', fuzzy_filter) if kw.strip()]
+
     for a in soup.find_all('a', href=True):
         href = a['href']
         full_link = urljoin(base_url, href)
@@ -30,15 +36,19 @@ def get_links_from_html(html: str, base_url: str, mode: str, regex_filter: str =
             if re.search(r'-episod-\d+', href):
                 links.add(full_link)
         else:  # All Links
-            if regex_filter:
-                if re.search(regex_filter, href, re.IGNORECASE):
-                    links.add(full_link)
+            if keywords:
+                for kw in keywords:
+                    score = fuzz.partial_ratio(href.lower(), kw.lower())
+                    if score >= 80:
+                        links.add(full_link)
+                        break
             else:
                 links.add(full_link)
+
     return list(links)
 
 
-def get_paginated_links(base_url: str, max_pages: int, mode: str, regex_filter: str = None) -> list:
+def get_paginated_links(base_url: str, max_pages: int, mode: str, fuzzy_filter: str = None) -> list:
     all_links = set()
 
     for page in range(1, max_pages + 1):
@@ -49,7 +59,7 @@ def get_paginated_links(base_url: str, max_pages: int, mode: str, regex_filter: 
 
         try:
             html = fetch_page(paginated_url)
-            page_links = get_links_from_html(html, base_url, mode, regex_filter)
+            page_links = get_links_from_html(html, base_url, mode, fuzzy_filter)
             if not page_links:
                 break
             all_links.update(page_links)
@@ -71,9 +81,9 @@ urls_input = st.text_area("🌐 Enter Base URLs", placeholder="https://v-myflm4u
 mode = st.radio("🔍 What type of links do you want to extract?", ["Episode Links Only", "All Links"])
 max_pages = st.slider("📄 Max Pages per URL", 1, 100, 100)
 
-regex_filter = None
+fuzzy_filter = None
 if mode == "All Links":
-    regex_filter = st.text_input("🧪 Optional Regex Filter (e.g. `drive|mega|zippy`)", placeholder="Leave empty to get all links")
+    fuzzy_filter = st.text_input("🧪 Optional Fuzzy Filter (80%+ match, e.g. `drive|mega|zippy`)", placeholder="Leave empty to get all links")
 
 if st.button("🚀 Fetch Links"):
     base_urls = [url.strip() for url in urls_input.strip().splitlines() if url.strip()]
@@ -82,7 +92,7 @@ if st.button("🚀 Fetch Links"):
     with st.spinner("Scraping all URLs..."):
         for base_url in base_urls:
             try:
-                links = get_paginated_links(base_url, max_pages, mode, regex_filter)
+                links = get_paginated_links(base_url, max_pages, mode, fuzzy_filter)
                 for link in links:
                     all_results.append({
                         "Base URL": base_url,
