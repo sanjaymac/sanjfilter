@@ -31,11 +31,16 @@ def get_links_from_html(html: str, base_url: str, mode: str, regex_filter: str =
                 links.add(full_link)
         else:  # All Links
             if regex_filter:
-                if re.search(regex_filter, href, re.IGNORECASE):
-                    links.add(full_link)
+                try:
+                    # Fuzzy match with max cost = 1 (tweak as needed)
+                    if re.search(f"({regex_filter}){{e<=1}}", href, flags=re.IGNORECASE):
+                        links.add(full_link)
+                except Exception as e:
+                    print(f"Regex error: {e}")
             else:
                 links.add(full_link)
     return list(links)
+
 
 
 def get_paginated_links(base_url: str, max_pages: int, mode: str, regex_filter: str = None) -> list:
