@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-import re
+import regex as re
 import pandas as pd
 from urllib.parse import urljoin
 
