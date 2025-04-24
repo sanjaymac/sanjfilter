@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import pandas as pd
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 from rapidfuzz import fuzz
 
 
@@ -24,6 +24,7 @@ def get_links_from_html(html: str, base_url: str, mode: str, fuzzy_filter: str =
     soup = BeautifulSoup(html, 'html.parser')
     links = set()
 
+    # Prepare keywords for fuzzy matching
     keywords = []
     if fuzzy_filter:
         keywords = [kw.strip() for kw in re.split(r'[|,]', fuzzy_filter) if kw.strip()]
@@ -72,18 +73,35 @@ def get_paginated_links(base_url: str, max_pages: int, mode: str, fuzzy_filter: 
     return sorted(list(all_links))
 
 
+def build_search_url(base_url: str, query: str) -> str:
+    params = urlencode({'s': query})
+    return f"{base_url.rstrip('/')}?{params}"
+
+
 # --- Streamlit UI ---
 st.set_page_config(page_title="Link Extractor Tool", layout="wide")
 st.title("🔗 Multi-URL Link Extractor")
-st.markdown("Enter base URLs (one per line). This app scrapes either **all links** or **episode-based links** from paginated content.")
+st.markdown(
+    "Enter base URLs (one per line). This app scrapes either **all links**, **episode-based links**, or performs a **search** using a keyword from paginated or search result pages."
+)
 
-urls_input = st.text_area("🌐 Enter Base URLs", placeholder="https://v-myflm4u.com/category/curang-tanpa-niat/")
-mode = st.radio("🔍 What type of links do you want to extract?", ["Episode Links Only", "All Links"])
+urls_input = st.text_area("🌐 Enter Base URLs", placeholder="https://example.com/category/curang-tanpa-niat/")
+mode = st.radio(
+    "🔍 What type of links do you want to extract?",
+    ["Episode Links Only", "All Links", "Search with Keyword"]
+)
+
 max_pages = st.slider("📄 Max Pages per URL", 1, 100, 100)
 
+search_query = None
 fuzzy_filter = None
-if mode == "All Links":
-    fuzzy_filter = st.text_input("🧪 Optional Fuzzy Filter (80%+ match, e.g. `drive|mega|zippy`)", placeholder="Leave empty to get all links")
+if mode == "Search with Keyword":
+    search_query = st.text_input("🔎 Enter Search Keyword", placeholder="e.g. Honey Minta Maaf")
+elif mode == "All Links":
+    fuzzy_filter = st.text_input(
+        "🧪 Optional Fuzzy Filter (80%+ match, e.g. `drive|mega|zippy`)",
+        placeholder="Leave empty to get all links"
+    )
 
 if st.button("🚀 Fetch Links"):
     base_urls = [url.strip() for url in urls_input.strip().splitlines() if url.strip()]
@@ -92,7 +110,18 @@ if st.button("🚀 Fetch Links"):
     with st.spinner("Scraping all URLs..."):
         for base_url in base_urls:
             try:
-                links = get_paginated_links(base_url, max_pages, mode, fuzzy_filter)
+                # Determine which mode to use
+                if mode == "Search with Keyword":
+                    if not search_query:
+                        st.warning("Please enter a search keyword to proceed.")
+                        break
+                    search_url = build_search_url(base_url, search_query)
+                    html = fetch_page(search_url)
+                    # Reuse 'All Links' logic for search results
+                    links = get_links_from_html(html, base_url, "All Links", fuzzy_filter)
+                else:
+                    links = get_paginated_links(base_url, max_pages, mode, fuzzy_filter)
+
                 for link in links:
                     all_results.append({
                         "Base URL": base_url,
